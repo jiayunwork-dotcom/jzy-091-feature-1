@@ -84,6 +84,49 @@ export interface ScanResult {
   samples: PhasePoint[];
 }
 
+/** 序列整周期解算中单个采样点的审计记录 */
+export interface UnwrappedSample {
+  /** 采样点下标（从 0 开始，0 为参考点） */
+  index: number;
+  /** 采样时刻 t = index · sampleInterval，单位 s */
+  time: number;
+  /** 仪器解调后的原始（卷绕）相位读数，rad */
+  measuredPhase: number;
+  /** 本点相对参考点补上的整周期数 k（可正、可负、可为 0） */
+  cycleOffset: number;
+  /** 解缠后的连续相位 = measuredPhase + 2π·cycleOffset，rad */
+  unwrappedPhase: number;
+  /** 由解缠相位经标度因数反演的角速度 Ω = φ/K，rad/s */
+  omega: number;
+}
+
+/** 相邻两个采样点之间的步进审计（第 index-1 点 → 第 index 点） */
+export interface UnwrapStep {
+  /** 步进终点下标 */
+  index: number;
+  /** 解缠后的相位变化量 Δφ，rad */
+  phaseStep: number;
+  /** 对应的角速度变化量 ΔΩ = Δφ/K，rad/s */
+  omegaStep: number;
+}
+
+/** /unwrap 序列整周期解算的完整返回 */
+export interface UnwrapResult {
+  geometry: CoilGeometry;
+  fiberLength: number;
+  scaleFactor: number;
+  /** 采样间隔 dt，单位 s */
+  sampleInterval: number;
+  /** 缓变约束：相邻点允许的最大相位变化，rad（默认 π，即半个模糊周期） */
+  maxPhaseStep: number;
+  /** 序列长度 */
+  count: number;
+  /** 逐点解缠审计（含每点补上的整周期数） */
+  samples: UnwrappedSample[];
+  /** 逐步进审计，长度 count-1；count=1 时为空数组 */
+  steps: UnwrapStep[];
+}
+
 /** /closed-loop 薄层闭环修正返回 */
 export interface ClosedLoopResult {
   geometry: CoilGeometry;

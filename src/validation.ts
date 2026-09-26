@@ -108,8 +108,7 @@ export function validateOmegaList(input: unknown): number[] {
  * 校验线性扫描网格。
  * count 为 >=2 的正整数（端点各采样一次）；start/stop 为有限实数，
  * 允许 start > stop（反向扫描），允许负值。
- */
-export function validateGrid(input: unknown): OmegaGrid {
+ */export function validateGrid(input: unknown): OmegaGrid {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new ValidationError('grid 必须是包含 start、stop、count 的对象', 'grid');
   }
@@ -140,4 +139,70 @@ export function validateGrid(input: unknown): OmegaGrid {
   }
 
   return { start, stop, count };
+}
+
+/**
+ * 校验采样间隔：必须是正有限数。
+ * 连续相位序列的时间轴（t = i·dt）与缓变约束都建立在固定正采样间隔上。
+ */
+export function validateSampleInterval(value: unknown): number {
+  if (!isFiniteNumber(value)) {
+    throw new ValidationError('采样间隔 sampleInterval 必须是有限数值（s）', 'sampleInterval');
+  }
+  if (value <= 0) {
+    throw new ValidationError(
+      `采样间隔 sampleInterval 必须是正数（收到 ${value}）；` +
+        `连续序列的时间轴与相邻点缓变约束都依赖一个固定为正的采样间隔`,
+      'sampleInterval',
+    );
+  }
+  return value;
+}
+
+/**
+ * 校验按时间顺序排列的原始相位读数序列：非空、逐点为有限数值。
+ * 读数应是仪器解调后卷绕在主值区间内的相位（rad）；这里只对“有限数值”
+ * 做硬性校验，与几何参数校验风格一致——解缠算法对任何有限读数都有定义。
+ */
+export function validatePhaseSequence(input: unknown): number[] {
+  if (!Array.isArray(input)) {
+    throw new ValidationError('phases 必须是按时间顺序排列的相位读数数组（rad）', 'phases');
+  }
+  if (input.length === 0) {
+    throw new ValidationError('相位读数序列不能为空', 'phases');
+  }
+  return input.map((v, i) => {
+    if (!isFiniteNumber(v)) {
+      throw new ValidationError(
+        `相位读数必须是有限数值（rad），第 ${i} 个读数不是有限数值`,
+        `phases[${i}]`,
+      );
+    }
+    return v;
+  });
+}
+
+/**
+ * 校验缓变约束的最大相位步长：必须 ∈ (0, π]。
+ * 超过半个模糊周期 π 时，相邻点之间会同时存在多个可行的整周期补偿，
+ * 整周期解算失去唯一性前提，必须拒绝。
+ */
+export function validateMaxPhaseStep(value: unknown): number {
+  if (!isFiniteNumber(value)) {
+    throw new ValidationError('最大相位步长 maxPhaseStep 必须是有限数值（rad）', 'maxPhaseStep');
+  }
+  if (value <= 0) {
+    throw new ValidationError(
+      `最大相位步长 maxPhaseStep 必须大于 0（收到 ${value}）`,
+      'maxPhaseStep',
+    );
+  }
+  if (value > Math.PI) {
+    throw new ValidationError(
+      `最大相位步长 maxPhaseStep 不能超过半个模糊周期 π（收到 ${value}）；` +
+        `窗口过宽会让相邻点同时存在多个可行整周期补偿，整周期解算失去唯一性`,
+      'maxPhaseStep',
+    );
+  }
+  return value;
 }
