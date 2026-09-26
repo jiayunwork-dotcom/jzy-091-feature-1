@@ -109,8 +109,7 @@ export function validateOmegaList(input: unknown): number[] {
  * count 为 >=2 的正整数（端点各采样一次）；start/stop 为有限实数，
  * 允许 start > stop（反向扫描），允许负值。
  */
-export function validateGrid(input: unknown): OmegaGrid {
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+export function validateGrid(input: unknown): OmegaGrid {  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new ValidationError('grid 必须是包含 start、stop、count 的对象', 'grid');
   }
   const gr = input as Record<string, unknown>;
@@ -140,4 +139,64 @@ export function validateGrid(input: unknown): OmegaGrid {
   }
 
   return { start, stop, count };
+}
+
+/**
+ * 校验连续序列采样间隔 dt：必须是有限正数（秒）。
+ * dt <= 0 时“相邻差异”约束没有物理意义，一律带原因拒绝。
+ */
+export function validateSamplingInterval(input: unknown, field = 'samplingInterval'): number {
+  if (!isFiniteNumber(input)) {
+    throw new ValidationError('采样间隔 samplingInterval 必须是有限数值（秒）', field);
+  }
+  if (input <= 0) {
+    throw new ValidationError(
+      `采样间隔 samplingInterval 必须大于 0（收到 ${input}）；连续序列需要正数采样间隔才能谈相邻差异`,
+      field,
+    );
+  }
+  return input;
+}
+
+/**
+ * 校验连续测得的原始相位序列：
+ * 必须是非空有限数值数组（允许 0 与负值，卷绕主值允许负值）。
+ * 长度为一的序列合法，由解算模块退化为单点反演。
+ */
+export function validatePhaseSeries(input: unknown): number[] {
+  if (!Array.isArray(input)) {
+    throw new ValidationError('phases 必须是按时间顺序排列的原始相位数值数组', 'phases');
+  }
+  if (input.length === 0) {
+    throw new ValidationError('相位序列不能为空（至少需要 1 个读数）', 'phases');
+  }
+  return input.map((v, i) => {
+    if (!isFiniteNumber(v)) {
+      throw new ValidationError(
+        `相位序列第 ${i} 个读数必须是有限数值（收到 ${String(v)}）；NaN/Infinity 无法参与整周期解算`,
+        `phases[${i}]`,
+      );
+    }
+    return v;
+  });
+}
+
+/**
+ * 校验整周期解算的缓变约束上限：必须是 (0, π] 内的有限实数（rad/采样间隔）。
+ * 超过 π 时相邻点可能同时存在多个可行整周期补偿，歧义不再可唯一解开。
+ */
+export function validateMaxPhaseStep(input: unknown): number {
+  if (!isFiniteNumber(input)) {
+    throw new ValidationError('maxPhaseStep 必须是有限数值（rad）', 'maxPhaseStep');
+  }
+  if (input <= 0) {
+    throw new ValidationError(`maxPhaseStep 必须大于 0（收到 ${input}）`, 'maxPhaseStep');
+  }
+  if (input > Math.PI) {
+    throw new ValidationError(
+      `maxPhaseStep 不能超过 π（收到 ${input}）；超过半个模糊周期时整周期补偿不再唯一`,
+      'maxPhaseStep',
+    );
+  }
+  return input;
 }

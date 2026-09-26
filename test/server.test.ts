@@ -7,6 +7,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildServer } from '../src/server.js';
+import { wrapToPrincipal } from '../src/ambiguity.js';
+import { sagnacPhase } from '../src/sagnac.js';
 
 const app = buildServer();
 
@@ -185,4 +187,83 @@ test('未知路由返回 404 JSON', async () => {
   const res = await app.inject({ method: 'GET', url: '/nope' });
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error, 'not_found');
+});
+
+test('POST /unwrap 小角速度序列与单点反演一致且不补整圈', async () => {
+  const phases = [0, 1e-5, 2e-5, 1e-5, 0];
+  const res = await app.inject({
+    method: 'POST',
+    url: '/unwrap',
+    payload: { geometry, samplingInterval: 0.05, phases },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json();
+  assert.equal(body.count, 5);
+  assert.equal(body.samplingInterval, 0.05);
+  for (let i = 0; i < phases.length; i++) {
+    const s = body.samples[i];
+    assert.equal(s.rawPhase, phases[i]);
+    assert.equal(s.cycleOffset, 0);
+    // 与“同样的相位逐点丢给现有单点反演链路”的结果数值一致
+    const single = await app.inject({
+      method: 'POST',
+      url: '/calibrate',
+      payload: { geometry, phase: phases[i] },
+    });
+    assert.ok(Math.abs(s.omegaHat - single.json().omegaHat) < 1e-25, `点 ${i} 与单点反演不一致`);
+  }
+});
+
+test('POST /unwrap 人为卷绕序列往返还原（很多单点单独看已超模糊阈值）', async () => {
+  const omegas = Array.from({ length: 40 }, (_, i) => 30 * (i / 39));
+  const truePhases = omegas.map((w) => sagnacPhase(geometry, w));
+  const phases = truePhases.map(wrapToPrincipal);
+  assert.ok(phases.some((p, i) => Math.abs(p - truePhases[i]) > Math.PI), '测试前提：序列含截断点');
+  const res = await app.inject({
+    method: 'POST',
+    url: '/unwrap',
+    payload: { geometry, samplingInterval: 0.04, phases },
+  });
+  assert.equal(res.statusCode, 200);
+  const body = res.json();
+  body.samples.forEach((s: { omegaHat: number; cycleStep: number | null }, i: number) => {
+    assert.ok(Math.abs(s.omegaHat - omegas[i]) < 1e-8, `点 ${i} 轨迹还原不符`);
+  });
+  assert.ok(body.samples.some((s: { cycleStep: number | null }) => s.cycleStep !== null && s.cycleStep !== 0));
+});
+
+test('POST /unwrap 缓变约束不满足 → 422 且指出具体采样点与枚举候选', async () => {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/unwrap',
+    payload: {
+      geometry,
+      samplingInterval: 0.05,
+      phases: [0, 0.1 * Math.PI, wrapToPrincipal(0.7 * Math.PI)],
+      maxPhaseStep: 0.5 * Math.PI,
+    },
+  });
+  assert.equal(res.statusCode, 422);
+  const body = res.json();
+  assert.equal(body.error, 'unwrap_constraint_violation');
+  assert.equal(body.index, 2);
+  assert.equal(body.field, 'phases[2]');
+  assert.equal(body.kind, 'no_valid_cycle');
+  assert.ok(Array.isArray(body.candidates) && body.candidates.length > 0);
+});
+
+test('POST /unwrap 采样间隔非正 / 序列含 NaN / 空序列 → 400 带原因', async () => {
+  const cases: Record<string, unknown>[] = [
+    { geometry, samplingInterval: 0, phases: [0, 1] },
+    { geometry, samplingInterval: -0.01, phases: [0, 1] },
+    { geometry, samplingInterval: 0.05, phases: [0, Number.NaN] },
+    { geometry, samplingInterval: 0.05, phases: [] },
+    { geometry, phases: [0, 1] },
+  ];
+  for (const payload of cases) {
+    const res = await app.inject({ method: 'POST', url: '/unwrap', payload });
+    assert.equal(res.statusCode, 400, JSON.stringify(payload));
+    assert.equal(res.json().error, 'invalid_request');
+    assert.ok(typeof res.json().reason === 'string');
+  }
 });

@@ -95,3 +95,48 @@ export interface ClosedLoopResult {
   omega: number;
   note: string;
 }
+
+/** 连续相位序列整周期解算后单个采样点（逐点可审查） */
+export interface UnwrapSample {
+  /** 采样点序号（从 0 开始） */
+  index: number;
+  /** 相对序列起点的时间 t = index·dt，s */
+  time: number;
+  /** 仪器解调后卷绕在主值区间内的原始相位读数，rad */
+  rawPhase: number;
+  /** 相对参考点累计补上的整周期数 n_i：unwrappedPhase = rawPhase + 2π·n_i */
+  cycleOffset: number;
+  /** 相对上一采样点补的整周期数 n_i − n_{i−1}；参考点为 null */
+  cycleStep: number | null;
+  /** 展开后的连续相位 Φ_i，rad */
+  unwrappedPhase: number;
+  /** 由展开相位线性反演的角速度 Ω̂_i = Φ_i/K，rad/s */
+  omegaHat: number;
+  /** 展开后相邻相位步长 Φ_i − Φ_{i−1}，rad；参考点为 null */
+  phaseStep: number | null;
+  /** 相邻角速度变化幅度 Ω̂_i − Ω̂_{i−1}，rad/s；参考点为 null */
+  deltaOmega: number | null;
+}
+
+/** /unwrap 连续相位序列整周期解算返回 */
+export interface UnwrapResult {
+  geometry: CoilGeometry;
+  fiberLength: number;
+  scaleFactor: number;
+  /** 解调电路的固定采样间隔 dt，s */
+  samplingInterval: number;
+  /** 序列长度 */
+  count: number;
+  /** 单个采样间隔允许的最大相位步长（缓变约束），rad，默认 π */
+  maxPhaseStep: number;
+  /** 缓变约束折算到角速度：maxPhaseStep/K，rad/s */
+  maxOmegaStep: number;
+  /** 参考点信息：序列绝对 2π 模糊无法由相邻差异消除，固定取首点 cycleOffset=0 */
+  anchor: {
+    index: 0;
+    cycleOffset: 0;
+    note: string;
+  };
+  /** 逐点展开结果（含每点补的整周期数与相邻角速度变化幅度，可审查） */
+  samples: UnwrapSample[];
+}

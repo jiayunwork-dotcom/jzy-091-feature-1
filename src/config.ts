@@ -13,6 +13,13 @@ export const SPEED_OF_LIGHT = 299_792_458 as const;
 export const AMBIGUITY_THRESHOLD = 0.9 * Math.PI;
 
 /**
+ * 连续相位序列整周期解算的默认缓变约束：一个采样间隔内真实相位步长
+ * 不得超过半个模糊周期 π。这是整周期歧义可唯一解开的根本前提
+ * （|ΔΦ| < π 时，相邻主值读数之间至多只有一个整周期补偿量满足约束）。
+ */
+export const UNWRAP_MAX_PHASE_STEP = Math.PI;
+
+/**
  * 内置参考线圈（光纤总长约 200 m）：
  *   R = 0.05 m，N = 640 圈  =>  L = 2π·0.05·640 ≈ 201.06 m
  *   λ = 1.55 μm（典型光纤陀螺光源波长）

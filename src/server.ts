@@ -9,6 +9,7 @@
  *   POST /calibrate     几何 + 实测相位   → 反演角速度（带模糊显式告警）
  *   POST /scan          几何 + 角速度数组或线性网格 → 逐点真算采样序列
  *   POST /closed-loop   几何 + 解调反馈相位 → 薄层闭环反演角速度
+ *   POST /unwrap        几何 + dt + 卷绕相位序列 → 整周期展开与角速度时间轨迹
  */
 import Fastify, { type FastifyInstance } from 'fastify';
 import { fiberLength } from './geometry.js';
@@ -16,13 +17,17 @@ import { computeOpenLoop, omegaFromPhase, scaleFactor } from './sagnac.js';
 import { assessAmbiguity } from './ambiguity.js';
 import { closedLoopOmega } from './closedloop.js';
 import { linspace, scanOmegas } from './scan.js';
+import { UnwrapConstraintError, unwrapPhaseSeries } from './unwrap.js';
 import { getReference } from './reference.js';
 import {
   ValidationError,
   validateGeometry,
   validateGrid,
+  validateMaxPhaseStep,
   validateOmega,
   validateOmegaList,
+  validatePhaseSeries,
+  validateSamplingInterval,
 } from './validation.js';
 import { AMBIGUITY_THRESHOLD } from './config.js';
 
@@ -33,6 +38,11 @@ export function buildServer(): FastifyInstance {
   app.setErrorHandler((err, _request, reply) => {
     if (err instanceof ValidationError) {
       reply.status(400).send(err.toJSON());
+      return;
+    }
+    // 连续序列缓变约束不满足：请求本身合法（400 不适用），是数据说不通（422）
+    if (err instanceof UnwrapConstraintError) {
+      reply.status(422).send(err.toJSON());
       return;
     }
     // Fastify body 解析错误等
@@ -120,6 +130,24 @@ export function buildServer(): FastifyInstance {
     const geometry = validateGeometry(body.geometry);
     const feedbackPhase = validateOmega(body.feedbackPhase, 'feedbackPhase');
     return reply.send(closedLoopOmega(geometry, feedbackPhase));
+  });
+
+  // 连续相位序列整周期解算：卷绕读数 → 连续相位历程 → 角速度时间轨迹
+  app.post('/unwrap', async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const geometry = validateGeometry(body.geometry);
+
+    if (!('samplingInterval' in body)) {
+      throw new ValidationError('缺少采样间隔 samplingInterval（秒）', 'samplingInterval');
+    }
+    const samplingInterval = validateSamplingInterval(body.samplingInterval);
+    const phases = validatePhaseSeries(body.phases);
+    const maxPhaseStep =
+      body.maxPhaseStep === undefined ? undefined : validateMaxPhaseStep(body.maxPhaseStep);
+
+    return reply.send(
+      unwrapPhaseSeries(geometry, phases, { samplingInterval, maxPhaseStep }),
+    );
   });
 
   // 让未匹配路由也返回 JSON
